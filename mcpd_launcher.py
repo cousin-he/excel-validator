@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 mcpd_launcher.py
-Lance une interface web simple pour valider des fichiers MCPD
-en utilisant ton validator.py existant.
+Interface web pour valider des fichiers selon :
+- MCPD v4.3 (ressources génétiques)
+- Climatique (données environnementales)
 
 Usage:
     python mcpd_launcher.py
 
-Puis ouvre http://localhost:5050
+Puis ouvrir http://localhost:5050
 """
 
 import os
@@ -15,9 +16,10 @@ import sys
 import tempfile
 from flask import Flask, request, render_template_string
 
-# Charge ton validator.py
+# Chargement des deux validateurs
 sys.path.insert(0, r"C:\Users\rahma\developement")
-from validator import run_validation
+from validator import run_validation as run_mcpd
+from validator_climate import run_validation as run_climate
 
 app = Flask(__name__)
 
@@ -26,9 +28,9 @@ HTML = """
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>MCPD Validator v4.3</title>
+    <title>Validateur de données - MCPD & Climat</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 20px; }
         h1 { color: #2c3e50; }
         .upload-box {
             border: 2px dashed #3498db;
@@ -66,6 +68,18 @@ HTML = """
         .badge { display: inline-block; margin-bottom: 15px; font-size: 18px; }
         .nav { background: #2c3e50; color: white; padding: 10px 20px; margin: -20px -20px 30px -20px; }
         .nav a { color: #3498db; text-decoration: none; margin-right: 20px; }
+        .selector {
+            margin: 15px 0;
+            text-align: left;
+            display: inline-block;
+        }
+        .selector label {
+            margin-right: 20px;
+            font-weight: normal;
+        }
+        input[type="radio"] {
+            margin-right: 5px;
+        }
     </style>
 </head>
 <body>
@@ -74,14 +88,25 @@ HTML = """
         <a href="http://localhost:8888">&larr; Retour MIAPPE</a>
     </div>
 
-    <h1>MCPD v2.1 &mdash; Germplasm Passport Validator</h1>
-    <p>Validate your Excel files according to the MCPD v2.1 standard (Multi-Crop Passport Descriptors).</p>
+    <h1>Validateur de données normalisées</h1>
+    <p>Choisissez le type de validation, puis sélectionnez un fichier Excel (.xlsx).</p>
 
     <div class="upload-box">
         <form method="POST" enctype="multipart/form-data">
-            <p>Please select your Excel file (.xlsx)</p>
+            <div class="selector">
+                <label>
+                    <input type="radio" name="validation_type" value="mcpd" {% if validation_type == 'mcpd' %}checked{% endif %}>
+                    🌾 MCPD (ressources génétiques)
+                </label>
+                <label>
+                    <input type="radio" name="validation_type" value="climate" {% if validation_type == 'climate' %}checked{% endif %}>
+                    🌡️ Climatique (environnemental)
+                </label>
+            </div>
+            <br>
+            <p>📎 Fichier Excel (.xlsx) :</p>
             <input type="file" name="fichier" accept=".xlsx" required><br><br>
-            <button type="submit">Valider</button>
+            <button type="submit">Lancer la validation</button>
         </form>
     </div>
 
@@ -103,17 +128,23 @@ HTML = """
 def index():
     rapport = None
     valide = False
+    validation_type = "mcpd"  # valeur par défaut
 
     if request.method == "POST":
         fichier = request.files.get("fichier")
+        validation_type = request.form.get("validation_type", "mcpd")
+
         if fichier and fichier.filename.endswith(".xlsx"):
-            # Sauvegarde temporaire
             with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
                 fichier.save(tmp.name)
                 tmp_path = tmp.name
             try:
-                rapport = run_validation(tmp_path)
-                valide = "Blocking errors   : 0" in rapport
+                if validation_type == "mcpd":
+                    rapport = run_mcpd(tmp_path)
+                else:  # climate
+                    rapport = run_climate(tmp_path)
+                # Détection de validité : on cherche "Blocking errors      : 0" dans le rapport
+                valide = "Blocking errors      : 0" in rapport
             except Exception as e:
                 rapport = f"[ERREUR] {e}"
                 valide = False
@@ -123,13 +154,12 @@ def index():
                 except:
                     pass
 
-    return render_template_string(HTML, rapport=rapport, valide=valide)
+    return render_template_string(HTML, rapport=rapport, valide=valide, validation_type=validation_type)
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  MCPD Validator v4.3")
+    print("  Validateur unifié - MCPD & Climat")
     print("  http://localhost:5050")
     print("=" * 50)
     app.run(port=5050, debug=True)
-    
