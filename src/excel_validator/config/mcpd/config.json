@@ -1,0 +1,36 @@
+{
+    "settings": {
+        "schemaPath": "schema",
+        "pluginPath": "plugins",
+        "allowAdditionalSheets": true,
+        "requireSheetOrder": false,
+        "adjustTypeForStringColumns": true,
+        "removeEmptyRows": true,
+        "removeEmptyColumns": true
+    },
+    "webinterface": [
+        {
+            "description": "MCPD v2.1 validation options",
+            "options": [
+                {
+                    "type": "boolean",
+                    "setting": ["settings", "allowAdditionalSheets"],
+                    "default": true,
+                    "label": "Allow additional sheets"
+                },
+                {
+                    "type": "boolean",
+                    "setting": ["settings", "requireSheetOrder"],
+                    "default": false,
+                    "label": "Require predefined sheet order"
+                }
+            ]
+        }
+    ],
+    "sheets": [
+        {
+            "name": "MCPD",
+            "optional": true
+        }
+    ]
+}

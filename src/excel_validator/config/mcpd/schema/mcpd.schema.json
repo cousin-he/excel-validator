@@ -1,0 +1,371 @@
+{
+    "fields": [
+        {
+            "name": "INSTCODE",
+            "title": "Holding institution code",
+            "description": "Code of the institute where the accession is maintained. Use the WIEWS institute code (http://www.fao.org/wiews) if available.",
+            "type": "string",
+            "constraints": {
+                "required": true
+            }
+        },
+        {
+            "name": "ACCENUMB",
+            "title": "Accession number",
+            "description": "This is the unique identifier for accessions within a genebank, and is assigned when a sample is entered into the genebank collection. Once assigned this number should never be reassigned to another accession in the collection.",
+            "type": "string",
+            "constraints": {
+                "required": true
+            }
+        },
+        {
+            "name": "COLLNUMB",
+            "title": "Collector's accession number",
+            "description": "Original identifier assigned by the collector(s) of the sample, normally composed of the name or initials of the collector(s) followed by a number.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "COLLCODE",
+            "title": "Collecting institute code",
+            "description": "FAO WIEWS code of the institute that has collected the sample.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "COLLNAME",
+            "title": "Collecting institute name",
+            "description": "Name of the institute that collected the sample. This is only required if 'COLLCODE' is not available.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "COLLINSTADDRESS",
+            "title": "Collecting institute address",
+            "description": "Address of the institute that has collected the sample.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "ACCENAME",
+            "title": "Accession name",
+            "description": "Either a registered or other designation given to the accession. Multiple names are separated by a semicolon without space.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "GENUS",
+            "title": "Genus",
+            "description": "Genus name for taxon. Initial uppercase letter required.",
+            "type": "string",
+            "constraints": {
+                "required": true,
+                "pattern": "^[A-Z][a-z]+(\\s[a-z]+)*$"
+            }
+        },
+        {
+            "name": "SPECIES",
+            "title": "Species",
+            "description": "Specific epithet portion of the scientific name in lowercase letters. Only the following abbreviation is allowed: 'sp.'",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^([a-z]+(\\s[a-z]+)*|sp\\.)$"
+            }
+        },
+        {
+            "name": "SPAUTHOR",
+            "title": "Species authority",
+            "description": "Provide the authority for the species name.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "SUBTAXA",
+            "title": "Subtaxon",
+            "description": "Subtaxon can be used to store any additional taxonomic identifier. The following abbreviations are allowed: 'subsp.' (for subspecies); 'convar.' (for convariety); 'var.' (for variety); 'f.' (for form); 'Group' (for cultivar group).",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^(subsp\\.|convar\\.|var\\.|f\\.|Group)\\s.+$"
+            }
+        },
+        {
+            "name": "SUBTAUTHOR",
+            "title": "Subtaxon authority",
+            "description": "Provide the subtaxon authority at the most detailed taxonomic level.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "CROPNAME",
+            "title": "Common crop name",
+            "description": "Common name of the crop. Example: malting barley, lambs lettuce.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "ACCENAME",
+            "title": "Accession name",
+            "description": "Either a registered or other designation given to the accession.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "ACQDATE",
+            "title": "Acquisition date",
+            "description": "Date on which the accession entered the collection (YYYYMMDD or YYYY-MM-DD or partial: YYYY-MM or YYYY).",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?|\\d{4}(\\d{2}(\\d{2})?)?$"
+            }
+        },
+        {
+            "name": "ORIGCTY",
+            "title": "Country of origin",
+            "description": "3-letter ISO 3166 country code of the country in which the sample was originally collected.",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^[A-Z]{3}$"
+            }
+        },
+        {
+            "name": "COLLSITE",
+            "title": "Location of collecting site",
+            "description": "Name of the site where the sample was collected. Farm, village, etc. as appropriate.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "DECLATITUDE",
+            "title": "Latitude of collecting site (decimal)",
+            "description": "Latitude expressed in decimal degrees. Positive values are North of the Equator; negative values are South of the Equator. Example: +24.9; -25.0.",
+            "type": "number",
+            "constraints": {
+                "required": false,
+                "minimum": -90,
+                "maximum": 90
+            }
+        },
+        {
+            "name": "LATITUDE",
+            "title": "Latitude of collecting site (DMS)",
+            "description": "Latitude expressed in DMS format: DDMMSS + compass direction (N or S), e.g. 0104500N.",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^\\d{6}[NS]$"
+            }
+        },
+        {
+            "name": "DECLONGITUDE",
+            "title": "Longitude of collecting site (decimal)",
+            "description": "Longitude expressed in decimal degrees. Positive values are East of the Greenwich Meridian; negative values are West of the Greenwich Meridian. Example: +15.87; -15.87.",
+            "type": "number",
+            "constraints": {
+                "required": false,
+                "minimum": -180,
+                "maximum": 180
+            }
+        },
+        {
+            "name": "LONGITUDE",
+            "title": "Longitude of collecting site (DMS)",
+            "description": "Longitude expressed in DMS format: DDDMMSS + compass direction (E or W), e.g. 0174530W.",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^\\d{7}[EW]$"
+            }
+        },
+        {
+            "name": "COORDUNCERT",
+            "title": "Coordinate uncertainty",
+            "description": "Uncertainty associated with the coordinates in meters. Leave the value empty if the uncertainty is unknown.",
+            "type": "integer",
+            "constraints": {
+                "required": false,
+                "minimum": 0
+            }
+        },
+        {
+            "name": "GEOREFMETH",
+            "title": "Geo-referencing method",
+            "description": "The geo-referencing method used (GPS, estimation from map, estimation calculated from village, etc.)",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "ELEVATION",
+            "title": "Elevation of collecting site",
+            "description": "Elevation of collecting site expressed in meters above sea level. Negative values are allowed.",
+            "type": "integer",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "COLLDATE",
+            "title": "Collecting date of sample",
+            "description": "Collecting date of the sample (YYYYMMDD or YYYY-MM-DD or partial: YYYY-MM or YYYY).",
+            "type": "string",
+            "constraints": {
+                "required": false,
+                "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?|\\d{4}(\\d{2}(\\d{2})?)?$"
+            }
+        },
+        {
+            "name": "BREDCODE",
+            "title": "Breeder's institute code",
+            "description": "FAO WIEWS code of the institute that has bred the material.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "BREDNAME",
+            "title": "Breeder's institute name",
+            "description": "Name of the institute (or individual) that bred the material. Required if 'BREDCODE' is not available.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "SAMPSTAT",
+            "title": "Biological status of accession",
+            "description": "The coding scheme proposed can be used at 3 different levels of detail: either by using the general codes (in boldface) such as 100, 200, 300, 400, 500, 600, 999; or by using the more specific codes.",
+            "type": "integer",
+            "constraints": {
+                "required": false,
+                "enum": [100, 110, 120, 130, 200, 300, 400, 410, 411, 412, 413, 414, 415, 416, 420, 421, 422, 423, 500, 600, 999]
+            }
+        },
+        {
+            "name": "ANCEST",
+            "title": "Pedigree",
+            "description": "Brief explanation of the pedigree or other description of the parental information, by which the variety, line, mutant, etc. was obtained.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "COLLSRC",
+            "title": "Collecting/acquisition source",
+            "description": "The coding scheme proposed can be used at 2 different levels of detail: either by using the general codes such as 10, 20, 30, 40, 50, 60, 99; or by using the more specific codes.",
+            "type": "integer",
+            "constraints": {
+                "required": false,
+                "enum": [10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 40, 50, 60, 61, 62, 99]
+            }
+        },
+        {
+            "name": "DONORCODE",
+            "title": "Donor institute code",
+            "description": "FAO WIEWS code of the donor institute.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "DONORNAME",
+            "title": "Donor institute name",
+            "description": "Name of the donor institute.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "DONORNUMB",
+            "title": "Donor's accession number",
+            "description": "Identifier assigned to an accession by the donor.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "OTHERNUMB",
+            "title": "Other identification numbers",
+            "description": "Any other identification number(s) known to exist in other collections for this accession.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "DUPLSITE",
+            "title": "Location of safety duplicates",
+            "description": "FAO WIEWS code of the institute(s) where a safety duplicate of the accession is maintained.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "DUPLINSTNAME",
+            "title": "Name of institution with safety duplicate",
+            "description": "Name of the institute where a safety duplicate of the accession is maintained.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "STORAGE",
+            "title": "Type of germplasm storage",
+            "description": "If the accession is maintained under different types of storage, multiple choices are allowed (separated by a semicolon). MCPD v2 additions are marked with an asterisk (*).",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        },
+        {
+            "name": "MLSSTAT",
+            "title": "MLS status of the accession",
+            "description": "The coded value referring to whether an accession is part of the Multilateral System (MLS) of the International Treaty on Plant Genetic Resources for Food and Agriculture (ITPGRFA).",
+            "type": "integer",
+            "constraints": {
+                "required": false,
+                "enum": [10, 20, 30]
+            }
+        },
+        {
+            "name": "REMARKS",
+            "title": "Remarks",
+            "description": "The remarks field is used to add notes that are essential for understanding a record. Not used for additional information on a field.",
+            "type": "string",
+            "constraints": {
+                "required": false
+            }
+        }
+    ]
+}

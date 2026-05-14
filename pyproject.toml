@@ -38,3 +38,6 @@ dependencies = {file = ["requirements.txt"]}
 [tool.read_version]
 version = "src.excel_validator._version:__version__"
 
+
+[tool.uv]
+package = true

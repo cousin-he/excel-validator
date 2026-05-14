@@ -1,0 +1,22 @@
+{
+    "checks": [
+        {
+            "type": "required-values",
+            "description": "INSTCODE must be present and non-empty",
+            "fields": ["INSTCODE"],
+            "message": "INSTCODE (holding institution code) is mandatory for all accessions"
+        },
+        {
+            "type": "required-values",
+            "description": "ACCENUMB must be present and non-empty",
+            "fields": ["ACCENUMB"],
+            "message": "ACCENUMB (accession number) is mandatory for all accessions"
+        },
+        {
+            "type": "required-values",
+            "description": "GENUS must be present and non-empty",
+            "fields": ["GENUS"],
+            "message": "GENUS is mandatory for all accessions"
+        }
+    ]
+}

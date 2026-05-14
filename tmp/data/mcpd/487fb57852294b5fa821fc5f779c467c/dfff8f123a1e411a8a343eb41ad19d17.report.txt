@@ -1,0 +1,4 @@
+=== VALID 'test_for_workshop_mcpd2.xlsx' (version 0.9.6) ===
+Warnings:
+- Package:
+  - Empty Package: no sheets found to be validated
