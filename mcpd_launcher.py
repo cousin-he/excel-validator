@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 mcpd_launcher.py
-Interface web pour valider des fichiers selon :
-- MCPD v4.3 (ressources génétiques)
-- Climatique (données environnementales)
+Web interface to validate files according to:
+- MCPD v4.3 (genetic resources)
+- Climate (environmental data)
 
 Usage:
     python mcpd_launcher.py
 
-Puis ouvrir http://localhost:5050
+Then open http://localhost:5050
 """
 
 import os
@@ -16,7 +16,6 @@ import sys
 import tempfile
 from flask import Flask, request, render_template_string
 
-# Chargement des deux validateurs
 sys.path.insert(0, r"C:\Users\rahma\developement")
 from validator import run_validation as run_mcpd
 from validator_climate import run_validation as run_climate
@@ -25,10 +24,10 @@ app = Flask(__name__)
 
 HTML = """
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Validateur de données - MCPD & Climat</title>
+    <title>Data Validator - MCPD & Climate</title>
     <style>
         body { font-family: Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 20px; }
         h1 { color: #2c3e50; }
@@ -51,7 +50,7 @@ HTML = """
             font-size: 16px;
         }
         button:hover { background: #2980b9; }
-        .rapport {
+        .report {
             background: #1e1e1e;
             color: #d4d4d4;
             padding: 20px;
@@ -85,40 +84,40 @@ HTML = """
 <body>
     <div class="nav">
         <strong>Excel Validator</strong>
-        <a href="http://localhost:8888">&larr; Retour MIAPPE</a>
+        <a href="http://localhost:8888">&larr; Back to MIAPPE</a>
     </div>
 
-    <h1>Validateur de données normalisées</h1>
-    <p>Choisissez le type de validation, puis sélectionnez un fichier Excel (.xlsx).</p>
+    <h1>Data Validator</h1>
+    <p>Choose validation type, then select an Excel file (.xlsx).</p>
 
     <div class="upload-box">
         <form method="POST" enctype="multipart/form-data">
             <div class="selector">
                 <label>
                     <input type="radio" name="validation_type" value="mcpd" {% if validation_type == 'mcpd' %}checked{% endif %}>
-                    🌾 MCPD (ressources génétiques)
+                    🌾 MCPD (genetic resources)
                 </label>
                 <label>
                     <input type="radio" name="validation_type" value="climate" {% if validation_type == 'climate' %}checked{% endif %}>
-                    🌡️ Climatique (environnemental)
+                    🌡️ Climate (environmental data)
                 </label>
             </div>
             <br>
-            <p>📎 Fichier Excel (.xlsx) :</p>
+            <p>📎 Excel file (.xlsx):</p>
             <input type="file" name="fichier" accept=".xlsx" required><br><br>
-            <button type="submit">Lancer la validation</button>
+            <button type="submit">Run validation</button>
         </form>
     </div>
 
-    {% if rapport %}
+    {% if report %}
         <div class="badge">
-            {% if valide %}
-                <span class="valid">VALIDE</span>
+            {% if valid %}
+                <span class="valid">VALID</span>
             {% else %}
-                <span class="invalid">INVALIDE</span>
+                <span class="invalid">INVALID</span>
             {% endif %}
         </div>
-        <div class="rapport">{{ rapport }}</div>
+        <div class="report">{{ report }}</div>
     {% endif %}
 </body>
 </html>
@@ -126,40 +125,39 @@ HTML = """
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    rapport = None
-    valide = False
-    validation_type = "mcpd"  # valeur par défaut
+    report = None
+    valid = False
+    validation_type = "mcpd"
 
     if request.method == "POST":
-        fichier = request.files.get("fichier")
+        file = request.files.get("fichier")
         validation_type = request.form.get("validation_type", "mcpd")
 
-        if fichier and fichier.filename.endswith(".xlsx"):
+        if file and file.filename.endswith(".xlsx"):
             with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-                fichier.save(tmp.name)
+                file.save(tmp.name)
                 tmp_path = tmp.name
             try:
                 if validation_type == "mcpd":
-                    rapport = run_mcpd(tmp_path)
-                else:  # climate
-                    rapport = run_climate(tmp_path)
-                # Détection de validité : on cherche "Blocking errors      : 0" dans le rapport
-                valide = "Blocking errors      : 0" in rapport
+                    report = run_mcpd(tmp_path)
+                else:
+                    report = run_climate(tmp_path)
+                valid = "Blocking errors      : 0" in report
             except Exception as e:
-                rapport = f"[ERREUR] {e}"
-                valide = False
+                report = f"[ERROR] {e}"
+                valid = False
             finally:
                 try:
                     os.unlink(tmp_path)
                 except:
                     pass
 
-    return render_template_string(HTML, rapport=rapport, valide=valide, validation_type=validation_type)
+    return render_template_string(HTML, report=report, valid=valid, validation_type=validation_type)
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  Validateur unifié - MCPD & Climat")
+    print("  Unified Validator - MCPD & Climate")
     print("  http://localhost:5050")
     print("=" * 50)
     app.run(port=5050, debug=True)
