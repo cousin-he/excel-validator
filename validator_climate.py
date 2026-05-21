@@ -1,7 +1,7 @@
 """
 validator_climate.py – Validation de données climatiques
-Structure du rapport identique au validateur MCPD v4.3
-Colonnes obligatoires : Name, Data Type, Location/Climate
+Colonnes obligatoires : Name, Data Type, Location/Climate 
+
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ except ImportError:
     sys.exit("[FATAL] frictionless non installé.\n  pip install frictionless 'frictionless[excel]' pandas openpyxl")
 
 # ==============================================================================
-# 1. CONSTANTES CLIMATIQUES (plages de validation)
+# 1. CONSTANTES CLIMATIQUES
 # ==============================================================================
 TEMP_MIN_ABS = -90.0
 TEMP_MAX_ABS = 60.0
@@ -43,16 +43,16 @@ VALID_ISO3_CODES = {
 }
 
 # ==============================================================================
-# 2. COLONNES OBLIGATOIRES (selon votre tableau)
+# 2. COLONNES OBLIGATOIRES (exactes, non renommées)
 # ==============================================================================
 MANDATORY_FIELDS = ("Name", "Data Type", "Location/Climate")
 
 # ==============================================================================
-# 3. DÉTECTION DES COLONNES CLIMATIQUES (flexible)
+# 3. DÉTECTION DES COLONNES CLIMATIQUES (protège les obligatoires)
 # ==============================================================================
 CLIMATE_KEYWORDS = {
     "station_id":   ["name", "station", "location", "site", "code"],
-    "date":         ["date", "year", "annee", "time", "timestamp"],
+    "date":         ["date", "year", "annee", "time", "timestamp","karnel"],
     "tmin":         ["tmin", "tn", "temp_min", "min_temp"],
     "tmax":         ["tmax", "tx", "temp_max", "max_temp"],
     "precip":       ["precip", "precipitation", "rain", "pluie", "rr"],
@@ -65,14 +65,15 @@ CLIMATE_KEYWORDS = {
 }
 
 def _map_columns(df: pd.DataFrame) -> dict:
-    """Retourne {nom_normalisé: nom_original} pour les colonnes climatiques."""
+    """Retourne {nom_normalisé: nom_original} pour les colonnes climatiques,
+       en ignorant les colonnes obligatoires."""
     mapping = {}
     df_cols_lower = {str(c).strip().lower(): c for c in df.columns}
     for standard, patterns in CLIMATE_KEYWORDS.items():
         for p in patterns:
             p_low = p.lower()
             for col_lower, orig in df_cols_lower.items():
-                if p_low in col_lower or col_lower in p_low:
+                if (p_low in col_lower or col_lower in p_low) and orig not in MANDATORY_FIELDS:
                     mapping[standard] = orig
                     break
             if standard in mapping:
@@ -92,7 +93,7 @@ def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df_std
 
 # ==============================================================================
-# 4. GESTION MULTI-FEUILLES (fusion possible)
+# 4. GESTION MULTI-FEUILLES
 # ==============================================================================
 def _detect_join_key(sheets: dict[str, pd.DataFrame]) -> str | None:
     if len(sheets) == 1:
@@ -101,7 +102,6 @@ def _detect_join_key(sheets: dict[str, pd.DataFrame]) -> str | None:
     common = set.intersection(*all_cols)
     if not common:
         return None
-    # Priorité aux colonnes obligatoires ou climatiques
     for priority in ["Name", "station_id", "date"]:
         if priority in common:
             return priority
@@ -122,15 +122,10 @@ def _load_multi_sheet(excel_path: str) -> tuple[pd.DataFrame, str]:
             print(f"[INFO] Feuille '{sheet_name}' : {len(df)} lignes, {len(df.columns)} colonnes", file=sys.stderr)
     if not sheets_raw:
         raise ValueError("Aucune feuille non vide trouvée.")
-    # Standardisation des colonnes climatiques (sans renommer les obligatoires)
-    sheets_std = {}
-    for name, df in sheets_raw.items():
-        df_std = _standardize_columns(df)
-        # Conserver les colonnes obligatoires telles quelles (pas renommées)
-        sheets_std[name] = df_std
+    sheets_std = {name: _standardize_columns(df) for name, df in sheets_raw.items()}
     join_key = _detect_join_key(sheets_std)
     if join_key is None:
-        print("[WARN] Aucune colonne commune trouvée pour fusionner. Utilisation de la première feuille uniquement.", file=sys.stderr)
+        print("[WARN] Aucune colonne commune trouvée. Utilisation de la première feuille.", file=sys.stderr)
         df_merged = next(iter(sheets_std.values()))
     else:
         print(f"[INFO] Fusion sur la clé : '{join_key}'", file=sys.stderr)
@@ -150,7 +145,7 @@ def _load_multi_sheet(excel_path: str) -> tuple[pd.DataFrame, str]:
     return df_merged, csv_path
 
 # ==============================================================================
-# 5. SCHÉMA FRICTIONLESS (uniquement pour colonnes climatiques reconnues)
+# 5. SCHÉMA FRICTIONLESS
 # ==============================================================================
 def _build_climate_schema(df_columns: list) -> Schema:
     field_defs = {
@@ -176,7 +171,6 @@ def _build_climate_schema(df_columns: list) -> Schema:
 # 6. VÉRIFICATIONS MÉTIER
 # ==============================================================================
 def _check_mandatory_fields(df: pd.DataFrame) -> list[dict]:
-    """Vérifie la présence des colonnes obligatoires (Name, Data Type, Location/Climate)."""
     issues = []
     for field in MANDATORY_FIELDS:
         if field not in df.columns:
@@ -186,10 +180,9 @@ def _check_mandatory_fields(df: pd.DataFrame) -> list[dict]:
                 "category": "MISSING_COLUMN",
                 "field": field,
                 "level": "ERROR",
-                "message": f"Colonne obligatoire '{field}' absente. Données climatiques exigent Name, Data Type et Location/Climate."
+                "message": f"Colonne obligatoire '{field}' absente."
             })
         else:
-            # Vérifier les valeurs manquantes dans la colonne (optionnel mais utile)
             missing = df[field].isna().sum()
             if missing > 0:
                 issues.append({
@@ -198,7 +191,7 @@ def _check_mandatory_fields(df: pd.DataFrame) -> list[dict]:
                     "category": "MISSING_VALUES",
                     "field": field,
                     "level": "WARNING",
-                    "message": f"Colonne '{field}' présente mais {missing} ligne(s) avec valeur manquante."
+                    "message": f"Colonne '{field}' présente mais {missing} ligne(s) vide(s)."
                 })
     return issues
 
@@ -213,7 +206,7 @@ def _check_tmin_tmax_consistency(df: pd.DataFrame) -> list[dict]:
                 issues.append({
                     "row": idx+2, "accenumb": str(station),
                     "category": "TMIN_TMAX_INCONSISTENCY", "field": "tmin/tmax", "level": "ERROR",
-                    "message": f"tmin ({tmin}) > tmax ({tmax}) : valeur impossible."
+                    "message": f"tmin ({tmin}) > tmax ({tmax})"
                 })
     return issues
 
@@ -227,7 +220,7 @@ def _check_negative_precip(df: pd.DataFrame) -> list[dict]:
                 issues.append({
                     "row": idx+2, "accenumb": str(station),
                     "category": "NEGATIVE_PRECIP", "field": "precip", "level": "ERROR",
-                    "message": f"Précipitation négative : {p}."
+                    "message": f"Précipitation négative : {p}"
                 })
     return issues
 
@@ -241,7 +234,7 @@ def _check_date_order(df: pd.DataFrame) -> list[dict]:
                 issues.append({
                     "row": 0, "accenumb": str(station),
                     "category": "DATE_ORDER", "field": "date", "level": "WARNING",
-                    "message": f"Dates non croissantes pour la station {station}."
+                    "message": f"Dates non croissantes pour la station {station}"
                 })
     return issues
 
@@ -257,13 +250,13 @@ def _check_coordinates_range(df: pd.DataFrame) -> list[dict]:
                         issues.append({
                             "row": idx+2, "accenumb": str(station),
                             "category": "LATITUDE_RANGE", "field": coord, "level": "ERROR",
-                            "message": f"Latitude {val} hors de [-90,90]."
+                            "message": f"Latitude {val} hors de [-90,90]"
                         })
                     elif coord == "longitude" and (val < -180 or val > 180):
                         issues.append({
                             "row": idx+2, "accenumb": str(station),
                             "category": "LONGITUDE_RANGE", "field": coord, "level": "ERROR",
-                            "message": f"Longitude {val} hors de [-180,180]."
+                            "message": f"Longitude {val} hors de [-180,180]"
                         })
     return issues
 
@@ -277,12 +270,12 @@ def _check_country_code(df: pd.DataFrame) -> list[dict]:
                 issues.append({
                     "row": idx+2, "accenumb": str(station),
                     "category": "INVALID_COUNTRY", "field": "country", "level": "WARNING",
-                    "message": f"Code pays '{c}' non reconnu (ISO 3166-1 alpha-3 attendu)."
+                    "message": f"Code pays '{c}' non reconnu (ISO3 attendu)"
                 })
     return issues
 
 # ==============================================================================
-# 7. RAPPORT STYLE MCPD (identique en présentation)
+# 7. RAPPORT (identique au vôtre)
 # ==============================================================================
 def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra_issues: list[dict]) -> str:
     W = 72
@@ -295,7 +288,6 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
             "+" + "-" * (W - 2) + "+",
         ]
 
-    # Erreurs frictionless (types, plages, enum)
     fl_issues = []
     if frictionless_report:
         for task in (frictionless_report.tasks or []):
@@ -335,7 +327,7 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
     lines = []
     lines += [
         rule("="),
-        "  CLIMATE DATA VALIDATION REPORT — MCPD‑like structure",
+        "  CLIMATE DATA VALIDATION REPORT ",
         f"(frictionless v{frictionless.__version__})",
         rule("="),
         f"  File                 : {excel_path}",
@@ -346,7 +338,6 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
         rule("="),
     ]
 
-    # Règles de validation (rappel)
     lines += ["", rule("-"), "  VALIDATION RULES (only if columns exist)", rule("-")]
     lines.append("  * Mandatory columns : Name, Data Type, Location/Climate")
     lines.append("  * tmin & tmax : numeric, tmin ≤ tmax, ranges [-90,60]")
@@ -357,7 +348,6 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
     lines.append("  * Other columns are ignored")
     lines.append(rule("="))
 
-    # Erreurs
     if errors:
         lines += [""] + box("BLOCKING ERRORS — Data cannot be ingested as is") + [""]
         for cat, cat_issues in sorted(errors_by_cat.items()):
@@ -366,7 +356,7 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
             suffix = "  [STRUCTURAL]" if n_struct > 0 else ""
             lines.append(f"  [{cat}]  {n_aff} affected row(s){suffix}")
             lines.append(rule("-"))
-            for iss in cat_issues[:15]:  # un peu plus pour les détails
+            for iss in cat_issues[:15]:
                 lines.append(
                     f"  Row {str(iss['row']).rjust(4)}  |  "
                     f"Identifier: {iss['accenumb'][:25].ljust(25)}  |  "
@@ -380,7 +370,6 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
     else:
         lines += ["", "  ✅ No critical errors detected.", ""]
 
-    # Avertissements
     if warnings:
         lines += [rule("=")] + box("WARNINGS — Quality recommendations") + [""]
         for cat, cat_issues in sorted(warnings_by_cat.items()):
@@ -401,7 +390,6 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
     else:
         lines += ["", "  ✅ No warnings detected.", ""]
 
-    # Résumé
     lines += [
         rule("="),
         "  SUMMARY",
@@ -423,7 +411,7 @@ def _format_report(excel_path: str, df: pd.DataFrame, frictionless_report, extra
     return "\n".join(lines)
 
 # ==============================================================================
-# 8. FONCTION PRINCIPALE EXPOSÉE
+# 8. FONCTION PRINCIPALE
 # ==============================================================================
 def run_validation(excel_path: str) -> str:
     try:
@@ -431,7 +419,6 @@ def run_validation(excel_path: str) -> str:
     except Exception as e:
         return f"[FATAL] Failed to load file: {e}"
 
-    # Appliquer le schéma frictionless uniquement pour les colonnes climatiques reconnues
     schema = _build_climate_schema(df.columns.tolist())
     frictionless_report = None
     try:
@@ -455,9 +442,6 @@ def run_validation(excel_path: str) -> str:
 
     return _format_report(excel_path, df, frictionless_report, extra)
 
-# ==============================================================================
-# 9. EXÉCUTION DIRECTE (test)
-# ==============================================================================
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         print(run_validation(sys.argv[1]))

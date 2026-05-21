@@ -1,12 +1,8 @@
 """
-MCPD Validator Pipeline v-Final — corrections ACCENUMB + unicité composite
-========================================================================
-
-
- cli.py importe 'validator_frictionless' — le fichier est donc renommé
-     validator_frictionless.py pour correspondre.
-
-
+MCPD Validator Pipeline v4.3.1 — final fix for INSTCODE/GENUS duplication
+==========================================================================
+This module validates an Excel file (multiple sheets) against MCPD and Germinate.
+It no longer renames INSTCODE or GENUS during merge.
 """
 
 from __future__ import annotations
@@ -16,7 +12,6 @@ import os
 import sys
 import tempfile
 import pandas as pd
-
 from collections import defaultdict
 
 try:
@@ -25,13 +20,14 @@ try:
     import frictionless
 except ImportError:
     sys.exit(
-        "[FATAL] frictionless non installé.\n"
+        "[FATAL] frictionless not installed.\n"
         "  pip install frictionless 'frictionless[excel]'"
     )
 
+print("*** USING CORRECTED VALIDATOR v4.3.1 ***", file=sys.stderr)
 
 # ==============================================================================
-# SECTION 1 — VALEURS CATÉGORIQUES (Germinate CATEGORICAL)
+# SECTION 1 — CATEGORICAL VALUES (Germinate CATEGORICAL)
 # ==============================================================================
 
 MLSSTAT_VALUES: dict[int, str] = {
@@ -108,9 +104,8 @@ CATEGORICAL_FIELDS: dict[str, dict[int, str]] = {
     "COLLSRC":  COLLSRC_VALUES,
 }
 
-
 # ==============================================================================
-# SECTION 2 — CODES PAYS ISO 3166-1 ALPHA-3 (champ ORIGCTY)
+# SECTION 2 — ISO 3166-1 ALPHA-3 COUNTRY CODES
 # ==============================================================================
 
 VALID_ISO3_CODES: set[str] = {
@@ -132,207 +127,103 @@ VALID_ISO3_CODES: set[str] = {
     "SDN","SUR","SJM","SWE","CHE","SYR","TWN","TJK","TZA","THA","TLS","TGO","TKL","TON",
     "TTO","TUN","TUR","TKM","TCA","TUV","UGA","UKR","ARE","GBR","UMI","USA","URY","UZB",
     "VUT","VEN","VNM","VGB","VIR","WLF","ESH","YEM","ZMB","ZWE",
-    # Codes historiques (fréquents dans les banques de gènes — décision Alexandre)
-    "XKX",  # Kosovo
-    "SCG",  # Serbie-et-Monténégro
-    "YUG",  # Yougoslavie
-    "CSK",  # Tchécoslovaquie
-    "DDR",  # Allemagne de l'Est
-    "SUN",  # URSS
+    "XKX","SCG","YUG","CSK","DDR","SUN",
 }
 
-
 # ==============================================================================
-# SECTION 3 — PATTERNS ET CONSTANTES DE VALIDATION
+# SECTION 3 — PATTERNS AND CONSTANTS
 # ==============================================================================
 
-# ── NOTE v4.3 ──────────────────────────────────────────────────────────────────
-# ACCENUMB_RE EST SUPPRIMÉ.
-# L'ACCENUMB est un texte LIBRE assigné par l'institution qui tient la collection.
-# Des exemples valides : 'KU 11483a', 'KU 11635b', 'PI 113869',
-#                        'Ae. Biuncialis - MVGB - 378', 'MG 00123'.
-# La SEULE vérification possible sur l'ACCENUMB seul est sa présence (non vide).
-# L'unicité est vérifiée sur la COMBINAISON (INSTCODE + GENUS + ACCENUMB).
-# ──────────────────────────────────────────────────────────────────────────────
-
-# LATITUDE DMS : DDMMSS + N ou S (7 caractères)
 LATITUDE_DMS_RE  = re.compile(r"^\d{2}\d{2}\d{2}[NS]$")
-
-# LONGITUDE DMS : DDDMMSS + E ou W (8 caractères)
 LONGITUDE_DMS_RE = re.compile(r"^\d{3}\d{2}\d{2}[EW]$")
-
-# SPECIES : tout en minuscules ou "sp."
 SPECIES_RE = re.compile(r"^([a-z]+(\s[a-z]+)*|sp\.)$")
-
-# SUBTAXA : préfixes autorisés par le standard MCPD
 VALID_SUBTAXA_PREFIXES = ("subsp.", "convar.", "var.", "f.", "Group")
-
-# Champs dont la présence est OBLIGATOIRE (décision Stephan + Alexandre)
-# INSTCODE et GENUS sont obligatoires en pratique (mid-term triad).
-# Note : pour ce dataset INSTCODE et GENUS sont absents -> quality warnings.
 MANDATORY_FIELDS = ("INSTCODE", "ACCENUMB", "GENUS")
 
-# Mots-clés MCPD pour détection automatique de l'en-tête
 MCPD_KNOWN_COLUMNS: set[str] = {
     "INSTCODE", "ACCENUMB", "ACCENAME", "GENUS", "SPECIES", "SUBTAXA",
     "LATITUDE", "LONGITUDE", "DECLATITUDE", "DECLONGITUDE",
-    "COORDUNCERT", "GEOREFMETH",
-    "COLLDATE", "COLLSITE", "COLLNUMB", "COLLCODE", "COLLNAME",
-    "ORIGCTY", "ORIGCTYNAME",
-    "SAMPSTAT", "MLSSTAT", "STORAGE", "COLLSRC",
-    "ACQDATE", "DONORCODE", "DONORNUMB", "DONORNAME",
-    "BREDCODE", "BREDNAME",
-    "REMARKS", "PUID", "ACCEURL",
-    # Colonnes métier de ce dataset
+    "COORDUNCERT", "GEOREFMETH", "COLLDATE", "COLLSITE", "COLLNUMB",
+    "COLLCODE", "COLLNAME", "ORIGCTY", "ORIGCTYNAME", "SAMPSTAT",
+    "MLSSTAT", "STORAGE", "COLLSRC", "ACQDATE", "DONORCODE", "DONORNUMB",
+    "DONORNAME", "BREDCODE", "BREDNAME", "REMARKS", "PUID", "ACCEURL",
     "GENOTYPE", "GENOTYPE NAME", "UCP CODE", "UCP_CODE",
     "ACCESSION", "ACCESSION NUMBER", "ACCESSION NAME",
 }
-
 MIN_HEADER_HITS = 2
 
-
 # ==============================================================================
-# SECTION 4 — DÉTECTION AUTOMATIQUE DE L'EN-TÊTE
+# SECTION 4 — HEADER DETECTION
 # ==============================================================================
 
 def _detect_header_row(xl: pd.ExcelFile, sheet_name: str, max_scan: int = 20) -> int:
     try:
         df_raw = xl.parse(sheet_name, header=None, nrows=max_scan, dtype=str)
     except Exception as e:
-        print(f"[WARN] Scan header '{sheet_name}' : {e}", file=sys.stderr)
+        print(f"[WARN] Header scan '{sheet_name}' : {e}", file=sys.stderr)
         return 0
-
     for row_idx, row in df_raw.iterrows():
         cells = {str(v).strip().upper() for v in row.dropna()}
         hits  = cells & MCPD_KNOWN_COLUMNS
         if len(hits) >= MIN_HEADER_HITS:
-            print(
-                f"[INFO] Feuille '{sheet_name}' : en-tête détecté ligne {row_idx} "
-                f"(hits : {sorted(hits)})",
-                file=sys.stderr,
-            )
+            print(f"[INFO] Sheet '{sheet_name}' : header at row {row_idx} hits {sorted(hits)}", file=sys.stderr)
             return int(row_idx)
-
-    print(
-        f"[WARN] Feuille '{sheet_name}' : aucun mot-clé MCPD trouvé dans les "
-        f"{max_scan} premières lignes. Ligne 0 utilisée par défaut.",
-        file=sys.stderr,
-    )
+    print(f"[WARN] Sheet '{sheet_name}' : no MCPD keywords, using row 0", file=sys.stderr)
     return 0
 
-
 # ==============================================================================
-# SECTION 5 — TRANSFORMATION Genotype -> ACCENUMB
+# SECTION 5 — Genotype -> ACCENUMB (free text)
 # ==============================================================================
 
 def genotype_to_accenumb(genotype: str) -> str:
-    """
-    Mappe la valeur brute de la colonne Genotype vers ACCENUMB.
-
-    Note Stephan v4.3 : ACCENUMB est du texte LIBRE.
-    On conserve la valeur brute telle quelle — aucune transformation n'est appliquée.
-    Le format 'Ae. Biuncialis - MVGB - 378' est une valeur parfaitement valide.
-    """
     return str(genotype).strip()
 
-
 # ==============================================================================
-# SECTION 6 — CONSTRUCTION DU SCHÉMA FRICTIONLESS
+# SECTION 6 — FRICTIONLESS SCHEMA
 # ==============================================================================
 
 def _build_schema(df: pd.DataFrame) -> Schema:
-    """
-    Construit le Schema frictionless pour les champs MCPD.
-    Les champs obligatoires n'ont PAS constraints={"required": True} :
-    la double-garde _check_mandatory_fields() est plus fiable.
-    """
     fields: list[Field] = []
-
-    # -- A) Champs OBLIGATOIRES (texte libre, sans required frictionless) ------
-    fields.append(fl_fields.StringField(
-        name="ACCENUMB",
-        title="Accession Number",
-        description=(
-            "Identifiant libre assigné par l'institution. TEXTE LIBRE. "
-            "Exemples valides : 'KU 11483a', 'PI 113869', 'Ae. Biuncialis - MVGB - 378'."
-        ),
-    ))
-    fields.append(fl_fields.StringField(
-        name="INSTCODE",
-        title="Institute Code (FAO WIEWS)",
-        description="Code FAO WIEWS obligatoire (ex. 'NOR039'). OBLIGATOIRE.",
-    ))
-    fields.append(fl_fields.StringField(
-        name="GENUS",
-        title="Genus",
-        description="Genre botanique, initiale majuscule (ex. 'Triticum'). OBLIGATOIRE.",
-    ))
-
-    # -- B) Champs CATEGORICAL -------------------------------------------------
+    fields.append(fl_fields.StringField(name="ACCENUMB", title="Accession Number"))
+    fields.append(fl_fields.StringField(name="INSTCODE", title="Institute Code (FAO WIEWS)"))
+    fields.append(fl_fields.StringField(name="GENUS", title="Genus"))
     for cat_field, cat_map in CATEGORICAL_FIELDS.items():
         fields.append(fl_fields.IntegerField(
             name=cat_field,
-            title=f"{cat_field} (CATEGORICAL)",
-            description=f"Type CATEGORICAL Germinate. Codes valides : {sorted(cat_map.keys())}.",
             constraints={"enum": sorted(cat_map.keys())},
         ))
-
-    # -- C) ORIGCTY -----------------------------------------------------------
-    fields.append(fl_fields.StringField(
-        name="ORIGCTY",
-        title="Country of Origin",
-        description="Code ISO 3166-1 alpha-3 (optionnel). Si présent, doit être valide.",
-        constraints={"enum": sorted(VALID_ISO3_CODES)},
-    ))
-
-    # -- D) Coordonnées décimales ---------------------------------------------
-    fields.append(fl_fields.NumberField(
-        name="DECLATITUDE",
-        constraints={"minimum": -90, "maximum": 90},
-    ))
-    fields.append(fl_fields.NumberField(
-        name="DECLONGITUDE",
-        constraints={"minimum": -180, "maximum": 180},
-    ))
-
-    # -- E) Coordonnées DMS ---------------------------------------------------
+    fields.append(fl_fields.StringField(name="ORIGCTY", constraints={"enum": sorted(VALID_ISO3_CODES)}))
+    fields.append(fl_fields.NumberField(name="DECLATITUDE", constraints={"minimum": -90, "maximum": 90}))
+    fields.append(fl_fields.NumberField(name="DECLONGITUDE", constraints={"minimum": -180, "maximum": 180}))
     fields.append(fl_fields.StringField(name="LATITUDE"))
     fields.append(fl_fields.StringField(name="LONGITUDE"))
-
-    # -- F) Autres champs MCPD optionnels -------------------------------------
     fields.append(fl_fields.StringField(name="SPECIES"))
     fields.append(fl_fields.StringField(name="SUBTAXA"))
     for col in ("REMARKS", "ACCENAME", "COLLSITE", "COLLNUMB", "ACQDATE",
                 "COLLDATE", "BREDCODE", "DONORCODE", "DONORNUMB", "COLLCODE", "PUID"):
         fields.append(fl_fields.StringField(name=col))
-
-    # -- G) Toutes les colonnes restantes (passthrough) -----------------------
     known_cols = {f.name for f in fields}
     for col in df.columns:
         if col not in known_cols:
             fields.append(fl_fields.StringField(name=col))
-
     return Schema(fields=fields)
 
-
 # ==============================================================================
-# SECTION 7 — UTILITAIRES
+# SECTION 7 — UTILITIES
 # ==============================================================================
 
 def _is_set(val) -> bool:
     return val is not None and str(val).strip() not in ("", "nan", "None", "NaT")
 
-
 # ==============================================================================
-# SECTION 8 — CHARGEMENT EXCEL ET PRÉPARATION DU CSV
+# SECTION 8 — EXCEL LOADING AND MERGING (FIXED)
 # ==============================================================================
 
 def _load_and_prepare(excel_path: str) -> tuple[pd.DataFrame, str]:
-    xl          = pd.ExcelFile(excel_path)
+    xl = pd.ExcelFile(excel_path)
     sheet_names = xl.sheet_names
-
     if not sheet_names:
-        raise ValueError("Le fichier Excel ne contient aucune feuille.")
+        raise ValueError("No sheets found.")
 
     sheets: dict[str, pd.DataFrame] = {}
     for name in sheet_names:
@@ -342,32 +233,23 @@ def _load_and_prepare(excel_path: str) -> tuple[pd.DataFrame, str]:
             df_tmp.dropna(how="all", inplace=True)
             df_tmp.dropna(axis=1, how="all", inplace=True)
             df_tmp.columns = df_tmp.columns.str.strip()
-            df_tmp = df_tmp[~(
-                df_tmp.astype(str)
-                      .apply(lambda r: r.str.strip().eq("").all(), axis=1)
-            )]
+            df_tmp = df_tmp[~(df_tmp.astype(str).apply(lambda r: r.str.strip().eq("").all(), axis=1))]
             if not df_tmp.empty:
                 sheets[name] = df_tmp
-                print(
-                    f"[INFO] Feuille '{name}' : {len(df_tmp)} lignes, "
-                    f"{len(df_tmp.columns)} colonnes. "
-                    f"En-têtes : {list(df_tmp.columns[:8])}",
-                    file=sys.stderr,
-                )
+                print(f"[INFO] Sheet '{name}' : {len(df_tmp)} rows, {len(df_tmp.columns)} cols. Headers: {list(df_tmp.columns[:8])}", file=sys.stderr)
             else:
-                print(f"[WARN] Feuille '{name}' vide après nettoyage.", file=sys.stderr)
+                print(f"[WARN] Sheet '{name}' empty after cleaning.", file=sys.stderr)
         except Exception as e:
-            print(f"[WARN] Feuille '{name}' ignorée : {e}", file=sys.stderr)
+            print(f"[WARN] Sheet '{name}' skipped: {e}", file=sys.stderr)
 
     if not sheets:
-        raise ValueError("Aucune feuille lisible dans le fichier.")
+        raise ValueError("No readable sheets.")
 
-    # Détection clé de jointure
     def _find_join_key(sheets: dict[str, pd.DataFrame]) -> str | None:
         if len(sheets) == 1:
             return None
         all_cols = [set(df.columns) for df in sheets.values()]
-        common   = set.intersection(*all_cols)
+        common = set.intersection(*all_cols)
         if not common:
             return None
         for c in common:
@@ -385,19 +267,26 @@ def _load_and_prepare(excel_path: str) -> tuple[pd.DataFrame, str]:
     if len(sheet_list) > 1:
         join_key = _find_join_key(sheets)
         if join_key is None:
-            raise ValueError("Aucune colonne commune trouvée pour la jointure entre les feuilles.")
+            raise ValueError("No common join column.")
         df = df.drop_duplicates(subset=[join_key])
         for sname, df_other in sheet_list[1:]:
             df_other = df_other.drop_duplicates(subset=[join_key])
-            overlap  = (set(df.columns) & set(df_other.columns)) - {join_key}
-            if overlap:
-                df       = df.rename(columns={c: c + f"_{base_name[:3]}"  for c in overlap})
-                df_other = df_other.rename(columns={c: c + f"_{sname[:3]}" for c in overlap})
+            overlap = (set(df.columns) & set(df_other.columns)) - {join_key}
+            # Columns that must NOT be duplicated: we drop them from the other sheet
+            keep_cols = {"INSTCODE", "GENUS", "ACCENUMB"}
+            # Columns to rename (all overlapping except the ones we keep)
+            rename_cols = overlap - keep_cols
+            if rename_cols:
+                df_other = df_other.rename(columns={c: f"{c}_{sname[:3]}" for c in rename_cols})
+            # Drop the kept columns from the other sheet to avoid _x/_y
+            drop_cols = overlap & keep_cols
+            if drop_cols:
+                df_other = df_other.drop(columns=drop_cols)
             df = df.merge(df_other, on=join_key, how="left")
 
-    print(f"[INFO] Colonnes fusionnées : {list(df.columns)}", file=sys.stderr)
+    print(f"[INFO] Merged columns : {list(df.columns)}", file=sys.stderr)
 
-    # Recherche de la colonne Genotype (exacte, suffixée, ou par inclusion)
+    # Locate Genotype column
     genotype_col = None
     for col in df.columns:
         if col.strip().lower() == "genotype":
@@ -414,60 +303,49 @@ def _load_and_prepare(excel_path: str) -> tuple[pd.DataFrame, str]:
                 genotype_col = col
                 break
 
-    print(f"[INFO] Colonne Genotype retenue : {repr(genotype_col)}", file=sys.stderr)
+    print(f"[INFO] Genotype column selected : {repr(genotype_col)}", file=sys.stderr)
 
     if genotype_col and "ACCENUMB" not in df.columns:
-        df.insert(
-            df.columns.get_loc(genotype_col) + 1,
-            "ACCENUMB",
-            df[genotype_col].apply(
-                lambda g: genotype_to_accenumb(g) if _is_set(g) else ""
-            ),
-        )
-        print(f"[INFO] ACCENUMB créée depuis '{genotype_col}'.", file=sys.stderr)
+        df.insert(df.columns.get_loc(genotype_col) + 1, "ACCENUMB",
+                  df[genotype_col].apply(lambda g: genotype_to_accenumb(g) if _is_set(g) else ""))
+        print(f"[INFO] ACCENUMB created from '{genotype_col}'.", file=sys.stderr)
     elif "ACCENUMB" in df.columns:
-        print("[INFO] Colonne ACCENUMB déjà présente.", file=sys.stderr)
+        print("[INFO] ACCENUMB already present.", file=sys.stderr)
     else:
-        print(
-            f"[ERREUR] Colonne 'Genotype' introuvable. "
-            f"Colonnes disponibles : {list(df.columns)}",
-            file=sys.stderr,
-        )
+        print(f"[ERROR] 'Genotype' column not found. Columns: {list(df.columns)}", file=sys.stderr)
 
-    print(f"[INFO] Lignes après fusion : {len(df)}", file=sys.stderr)
+    print(f"[INFO] Rows after merge : {len(df)}", file=sys.stderr)
 
     fd, csv_path = tempfile.mkstemp(suffix=".csv", dir=".", prefix="mcpd_tmp_")
     os.close(fd)
     df.to_csv(csv_path, index=False, encoding="utf-8")
-
     return df, csv_path
 
-
 # ==============================================================================
-# SECTION 9 — VÉRIFICATIONS POST-FRICTIONLESS
+# SECTION 9 — POST‑FRICTIONLESS CHECKS
 # ==============================================================================
 
 def _check_mandatory_fields(df: pd.DataFrame) -> list[dict]:
     """
-    Double-garde sur INSTCODE, ACCENUMB et GENUS.
-    Niveau 1 : MISSING_COLUMN  — colonne absente du DataFrame (1 issue globale).
-    Niveau 2 : MANDATORY_TRIAD — cellule vide dans une colonne présente (1 issue/ligne).
+    Double-check for mandatory columns (INSTCODE, ACCENUMB, GENUS).
+    Level 1: MISSING_COLUMN – column completely absent.
+    Level 2: MANDATORY_TRIAD – empty cells in present columns.
     """
     issues: list[dict] = []
 
-    # Niveau 1 : colonnes structurellement absentes
+    # Level 1: structurally absent columns
     for field in MANDATORY_FIELDS:
         if field in df.columns:
             continue
         if field == "ACCENUMB":
             msg = (
-                "Colonne 'ACCENUMB' introuvable. Elle est générée automatiquement "
-                "depuis la colonne 'Genotype'. Vérifiez que 'Genotype' existe dans le fichier."
+                "Column 'ACCENUMB' not found. It is automatically created "
+                "from the 'Genotype' column. Please ensure 'Genotype' exists."
             )
         else:
             msg = (
-                f"Colonne '{field}' ABSENTE du fichier Excel. "
-                "OBLIGATOIRE pour l'ingestion Germinate."
+                f"Column '{field}' MISSING from the Excel file. "
+                "REQUIRED for Germinate ingestion."
             )
         issues.append({
             "row": 0, "accenumb": "[STRUCTURE]",
@@ -475,15 +353,15 @@ def _check_mandatory_fields(df: pd.DataFrame) -> list[dict]:
             "level": "ERROR", "message": msg,
         })
 
-    # Niveau 2 : cellules vides dans colonnes présentes
+    # Level 2: empty cells in present mandatory columns
     present_mandatory = [f for f in MANDATORY_FIELDS if f in df.columns]
     for idx, row in df.iterrows():
         row_num   = int(idx) + 2
         acc_val   = str(row.get("ACCENUMB", "")).strip()
-        acc_label = acc_val if acc_val else f"[ligne {row_num}]"
+        acc_label = acc_val if acc_val else f"[row {row_num}]"
         for field in present_mandatory:
             if not _is_set(row.get(field)):
-                display_acc = f"[ligne {row_num}]" if field == "ACCENUMB" else acc_label
+                display_acc = f"[row {row_num}]" if field == "ACCENUMB" else acc_label
                 issues.append({
                     "row": row_num, "accenumb": display_acc,
                     "category": "MANDATORY_TRIAD", "field": field,
@@ -495,24 +373,21 @@ def _check_mandatory_fields(df: pd.DataFrame) -> list[dict]:
 
 def _check_accenumb_uniqueness(df: pd.DataFrame) -> list[dict]:
     """
-    ── NOTE v4.3 ──────────────────────────────────────────────────────────────
-    ACCENUMB est du texte LIBRE. Il n'y a AUCUNE contrainte de format.
-    La seule vérification valide est l'UNICITÉ DE LA COMBINAISON :
+    NOTE v4.3: ACCENUMB is FREE TEXT. No format constraints.
+    The only valid uniqueness check is on the combination:
         INSTCODE + GENUS + ACCENUMB
 
-    Deux accessions peuvent avoir le même ACCENUMB si elles appartiennent à
-    des institutions ou des genres différents — c'est la réalité des banques de gènes.
-    ──────────────────────────────────────────────────────────────────────────
+    Two accessions may share the same ACCENUMB if they belong to different
+    institutes or genera – this is realistic in gene banks.
     """
     issues: list[dict] = []
 
-    # On ne peut vérifier l'unicité composite que si les trois colonnes existent
     cols_present = [c for c in ("INSTCODE", "GENUS", "ACCENUMB") if c in df.columns]
     if "ACCENUMB" not in df.columns:
-        return issues  # déjà signalé comme MISSING_COLUMN
+        return issues  # already reported as MISSING_COLUMN
 
     if len(cols_present) < 3:
-        # Colonnes partielles : unicité sur ACCENUMB seul comme fallback
+        # Fallback: uniqueness on ACCENUMB alone
         missing_triad = [c for c in ("INSTCODE", "GENUS") if c not in df.columns]
         counts = df["ACCENUMB"].value_counts()
         dupes  = counts[counts > 1].index.tolist()
@@ -525,16 +400,15 @@ def _check_accenumb_uniqueness(df: pd.DataFrame) -> list[dict]:
                 "field":    "ACCENUMB",
                 "level":    "WARNING",
                 "message": (
-                    f"ACCENUMB '{dup}' apparaît {len(row_nums)} fois (lignes {row_nums}). "
-                    f"Note : l'unicité devrait être vérifiée sur la combinaison "
-                    f"INSTCODE + GENUS + ACCENUMB, mais {', '.join(missing_triad)} "
-                    f"{'est absente' if len(missing_triad)==1 else 'sont absentes'} "
-                    "de ce dataset. Vérification sur ACCENUMB seul en fallback."
+                    f"ACCENUMB '{dup}' appears {len(row_nums)} times (rows {row_nums}). "
+                    f"Uniqueness should be checked on INSTCODE+GENUS+ACCENUMB, but "
+                    f"{', '.join(missing_triad)} {'is' if len(missing_triad)==1 else 'are'} "
+                    f"missing from this dataset. Falling back to ACCENUMB alone."
                 ),
             })
         return issues
 
-    # Vérification sur la combinaison composite INSTCODE + GENUS + ACCENUMB
+    # Full composite key check
     df["_composite_key"] = (
         df["INSTCODE"].astype(str).str.strip() + " | " +
         df["GENUS"].astype(str).str.strip()    + " | " +
@@ -559,23 +433,22 @@ def _check_accenumb_uniqueness(df: pd.DataFrame) -> list[dict]:
             "field":    "INSTCODE + GENUS + ACCENUMB",
             "level":    "ERROR",
             "message": (
-                f"Combinaison dupliquée détectée aux lignes {row_nums} :\n"
+                f"Duplicate combination detected at rows {row_nums}:\n"
                 f"  INSTCODE = '{inst}'\n"
                 f"  GENUS    = '{genus}'\n"
                 f"  ACCENUMB = '{acc}'\n"
-                "La combinaison (INSTCODE + GENUS + ACCENUMB) doit être unique "
-                "au sein d'un même fichier. Deux accessions différentes ne peuvent "
-                "pas avoir les trois valeurs identiques simultanément."
+                "The combination (INSTCODE + GENUS + ACCENUMB) must be unique "
+                "within the same file."
             ),
         })
     return issues
 
 
 def _check_coordinate_exclusivity(df: pd.DataFrame) -> list[dict]:
-    """LATITUDE XOR DECLATITUDE ; LONGITUDE XOR DECLONGITUDE (décision Alexandre)."""
+    """LATITUDE XOR DECLATITUDE ; LONGITUDE XOR DECLONGITUDE (Germinate rule)."""
     issues = []
     for idx, row in df.iterrows():
-        acc = str(row.get("ACCENUMB", "")).strip() or f"ligne {int(idx) + 2}"
+        acc = str(row.get("ACCENUMB", "")).strip() or f"row {int(idx) + 2}"
         rn  = int(idx) + 2
         if _is_set(row.get("LATITUDE")) and _is_set(row.get("DECLATITUDE")):
             issues.append({
@@ -584,9 +457,9 @@ def _check_coordinate_exclusivity(df: pd.DataFrame) -> list[dict]:
                 "field":    "LATITUDE / DECLATITUDE",
                 "level":    "ERROR",
                 "message": (
-                    "Conflit latitude : LATITUDE (DMS) et DECLATITUDE (décimal) "
-                    "sont tous deux renseignés. Germinate rejette les deux simultanément. "
-                    "Conserver DECLATITUDE (décimal) de préférence."
+                    "Latitude conflict: LATITUDE (DMS) and DECLATITUDE (decimal) "
+                    "are both provided. Germinate rejects both simultaneously. "
+                    "Prefer DECLATITUDE (decimal)."
                 ),
             })
         if _is_set(row.get("LONGITUDE")) and _is_set(row.get("DECLONGITUDE")):
@@ -596,19 +469,19 @@ def _check_coordinate_exclusivity(df: pd.DataFrame) -> list[dict]:
                 "field":    "LONGITUDE / DECLONGITUDE",
                 "level":    "ERROR",
                 "message": (
-                    "Conflit longitude : LONGITUDE (DMS) et DECLONGITUDE (décimal) "
-                    "sont tous deux renseignés. Germinate rejette les deux simultanément. "
-                    "Conserver DECLONGITUDE (décimal) de préférence."
+                    "Longitude conflict: LONGITUDE (DMS) and DECLONGITUDE (decimal) "
+                    "are both provided. Germinate rejects both simultaneously. "
+                    "Prefer DECLONGITUDE (decimal)."
                 ),
             })
     return issues
 
 
 def _check_dms_format(df: pd.DataFrame) -> list[dict]:
-    """Format et plages DMS pour LATITUDE et LONGITUDE."""
+    """Validate DMS format and ranges for LATITUDE and LONGITUDE."""
     issues = []
     for idx, row in df.iterrows():
-        acc = str(row.get("ACCENUMB", "")).strip() or f"ligne {int(idx) + 2}"
+        acc = str(row.get("ACCENUMB", "")).strip() or f"row {int(idx) + 2}"
         rn  = int(idx) + 2
 
         lat_dms = str(row.get("LATITUDE", "")).strip()
@@ -618,8 +491,8 @@ def _check_dms_format(df: pd.DataFrame) -> list[dict]:
                     "row": rn, "accenumb": acc,
                     "category": "LATITUDE_FORMAT", "field": "LATITUDE", "level": "ERROR",
                     "message": (
-                        f"Invalid DMS format detected: '{lat_dms}'. "
-                        "Expected : DDMMSS + N or S (7 chars). Example : '103020S'."
+                        f"Invalid DMS format: '{lat_dms}'. "
+                        "Expected: DDMMSS + N or S (7 chars). Example: '103020S'."
                     ),
                 })
             else:
@@ -630,7 +503,7 @@ def _check_dms_format(df: pd.DataFrame) -> list[dict]:
                         "category": "LATITUDE_RANGE", "field": "LATITUDE", "level": "ERROR",
                         "message": (
                             f"DMS out of range: degrees={deg} (max 90), "
-                            f"minutes={mnt}(max 59), secondes={sec}(max 59)."
+                            f"minutes={mnt} (max 59), seconds={sec} (max 59)."
                         ),
                     })
 
@@ -641,8 +514,8 @@ def _check_dms_format(df: pd.DataFrame) -> list[dict]:
                     "row": rn, "accenumb": acc,
                     "category": "LONGITUDE_FORMAT", "field": "LONGITUDE", "level": "ERROR",
                     "message": (
-                        f"Invalid DMS format detected: '{lon_dms}'. "
-                        "Expected : DDDMMSS + E or W (8 chars). Example : '0762510W'."
+                        f"Invalid DMS format: '{lon_dms}'. "
+                        "Expected: DDDMMSS + E or W (8 chars). Example: '0762510W'."
                     ),
                 })
             else:
@@ -653,82 +526,82 @@ def _check_dms_format(df: pd.DataFrame) -> list[dict]:
                         "category": "LONGITUDE_RANGE", "field": "LONGITUDE", "level": "ERROR",
                         "message": (
                             f"DMS out of range: degrees={deg} (max 180), "
-                            f"minutes={mnt}(max 59), secondes={sec}(max 59)."
+                            f"minutes={mnt} (max 59), seconds={sec} (max 59)."
                         ),
                     })
     return issues
 
 
 def _check_genus_format(df: pd.DataFrame) -> list[dict]:
-    """GENUS doit commencer par une lettre majuscule (standard MCPD)."""
+    """GENUS must start with an uppercase letter (MCPD standard)."""
     issues = []
     for idx, row in df.iterrows():
         genus = row.get("GENUS")
         if _is_set(genus):
             g = str(genus).strip()
             if g and not g[0].isupper():
-                acc = str(row.get("ACCENUMB", "")).strip() or f"ligne {int(idx) + 2}"
+                acc = str(row.get("ACCENUMB", "")).strip() or f"row {int(idx) + 2}"
                 issues.append({
                     "row": int(idx) + 2, "accenumb": acc,
                     "category": "GENUS_FORMAT", "field": "GENUS", "level": "ERROR",
                     "message": (
                         f"GENUS '{g}' : lowercase initial letter. "
-                        f"Correction : '{g[0].upper() + g[1:]}'."
+                        f"Suggestion: '{g[0].upper() + g[1:]}'."
                     ),
                 })
     return issues
 
 
 def _check_species_format(df: pd.DataFrame) -> list[dict]:
-    """SPECIES doit être en minuscules ou valoir 'sp.'."""
+    """SPECIES must be all lowercase or equal to 'sp.'."""
     issues = []
     for idx, row in df.iterrows():
         species = row.get("SPECIES")
         if _is_set(species):
             s = str(species).strip()
             if s and not SPECIES_RE.match(s):
-                acc = str(row.get("ACCENUMB", "")).strip() or f"ligne {int(idx) + 2}"
+                acc = str(row.get("ACCENUMB", "")).strip() or f"row {int(idx) + 2}"
                 issues.append({
                     "row": int(idx) + 2, "accenumb": acc,
                     "category": "SPECIES_FORMAT", "field": "SPECIES", "level": "WARNING",
                     "message": (
                         f"SPECIES '{s}' must be in lowercase. "
-                        f"Correction : '{s.lower()}'."
+                        f"Suggestion: '{s.lower()}'."
                     ),
                 })
     return issues
 
 
 def _check_subtaxa_format(df: pd.DataFrame) -> list[dict]:
-    """SUBTAXA doit commencer par un préfixe MCPD autorisé."""
+    """SUBTAXA must start with an allowed MCPD prefix."""
     issues = []
     for idx, row in df.iterrows():
         subtaxa = row.get("SUBTAXA")
         if _is_set(subtaxa):
             s = str(subtaxa).strip()
             if s and not any(s.startswith(p) for p in VALID_SUBTAXA_PREFIXES):
-                acc = str(row.get("ACCENUMB", "")).strip() or f"ligne {int(idx) + 2}"
+                acc = str(row.get("ACCENUMB", "")).strip() or f"row {int(idx) + 2}"
                 issues.append({
                     "row": int(idx) + 2, "accenumb": acc,
                     "category": "SUBTAXA_FORMAT", "field": "SUBTAXA", "level": "WARNING",
                     "message": (
                         f"SUBTAXA '{s}' : prefix not recognized. "
-                        f"Allowed : {', '.join(VALID_SUBTAXA_PREFIXES)}."
+                        f"Allowed: {', '.join(VALID_SUBTAXA_PREFIXES)}."
                     ),
                 })
     return issues
 
 
 # ==============================================================================
-# SECTION 10 — CONSTRUCTION DU RAPPORT
+# SECTION 10 — REPORT GENERATION
 # ==============================================================================
 
 def _accenumb_for_row(df: pd.DataFrame, row_number: int) -> str:
     idx = row_number - 2
     if 0 <= idx < len(df):
         v = str(df.iloc[idx].get("ACCENUMB", "")).strip()
-        return v if v else f"[ligne {row_number}]"
-    return f"[ligne {row_number}]"
+        return v if v else f"[row {row_number}]"
+    return f"[row {row_number}]"
 
 
 def _friendly_message(field_name: str, code: str, note: str) -> str:
@@ -736,8 +609,8 @@ def _friendly_message(field_name: str, code: str, note: str) -> str:
         hints = {
             "ACCENUMB": (
                 "ACCENUMB (Genotype column) MISSING or EMPTY. "
-                "This field is REQUIRED — the accession cannot be created in Germinate. "
-                "ACCENUMB is FREE TEXT: any non-empty value is accepted."
+                "This field is REQUIRED – the accession cannot be created in Germinate. "
+                "ACCENUMB is FREE TEXT: any non‑empty value is accepted."
             ),
             "INSTCODE": (
                 "INSTCODE MISSING or EMPTY. "
@@ -747,7 +620,6 @@ def _friendly_message(field_name: str, code: str, note: str) -> str:
                 "GENUS MISSING or EMPTY. "
                 "Mandatory botanical genus, uppercase initial letter (e.g. 'Triticum', 'Aegilops')."
             ),
-            
         }
         return hints.get(field_name, f"Field '{field_name}' is required. {note}")
 
@@ -761,21 +633,21 @@ def _friendly_message(field_name: str, code: str, note: str) -> str:
         if field_name == "ORIGCTY":
             return (
                 "Unknown country code. ISO 3166-1 alpha-3 required (3 uppercase letters). "
-                "Historical codes accepted : XKX, SCG, YUG, CSK, DDR, SUN."
+                "Historical codes accepted: XKX, SCG, YUG, CSK, DDR, SUN."
             )
         if field_name == "DECLATITUDE":
-            return f"DECLATITUDE out of range [-90, +90]. Value : {note}"
+            return f"DECLATITUDE out of range [-90, +90]. Value: {note}"
         if field_name == "DECLONGITUDE":
-            return f"DECLONGITUDE out of range [-180, +180]. Value : {note}"
-        return f"Invalid value for '{field_name}'. Detail : {note}"
+            return f"DECLONGITUDE out of range [-180, +180]. Value: {note}"
+        return f"Invalid value for '{field_name}'. Detail: {note}"
 
     if "type" in code:
         if field_name in CATEGORICAL_FIELDS:
             return (
-                f"Type invalid for '{field_name}' : integer expected, received : {note}. "
-                f"Valid codes : {sorted(CATEGORICAL_FIELDS[field_name].keys())}"
+                f"Invalid type for '{field_name}' : integer expected, received: {note}. "
+                f"Valid codes: {sorted(CATEGORICAL_FIELDS[field_name].keys())}"
             )
-        return f"Type invalid for '{field_name}' : {note}"
+        return f"Invalid type for '{field_name}' : {note}"
 
     return note or f"Error '{code}' on '{field_name}'."
 
@@ -808,9 +680,9 @@ def _format_report(
                 note    = getattr(err, "note", "") or str(err)
 
                 if raw_row is None:
-                    continue  # erreur structurelle frictionless — couverte par double-garde Python
+                    continue  # structural frictionless error – already covered by Python double-check
                 if "required" in code:
-                    continue  # doublon avec _check_mandatory_fields
+                    continue  # duplicate of _check_mandatory_fields
 
                 row_num = raw_row + 1
                 acc     = _accenumb_for_row(df, row_num)
@@ -849,7 +721,7 @@ def _format_report(
 
     n_err  = len(errors)
     n_warn = len(warnings)
-    status = "INVALIDE" if errors else "VALIDE"
+    status = "INVALID" if errors else "VALID"
 
     lines: list[str] = []
 
@@ -866,7 +738,7 @@ def _format_report(
         rule("="),
     ]
 
-    # Rappel règle ACCENUMB — mise en évidence dans le rapport
+    # ACCENUMB rule reminder
     lines += [
         "",
         rule("-"),
@@ -882,7 +754,7 @@ def _format_report(
         rule("="),
     ]
 
-    # Référentiel CATEGORICAL
+    # Categorical reference
     lines += ["", rule("-"), "  REFERENCE — CATEGORICAL FIELDS (GERMINATE)", rule("-")]
     for fname, fmap in CATEGORICAL_FIELDS.items():
         lines.append(f"  {fname} :")
@@ -891,28 +763,28 @@ def _format_report(
         lines.append("")
     lines.append(rule("="))
 
-    # Règles principales
+    # Main rules
     lines += [
         "  MANDATORY FIELDS ",
         rule("-"),
-        "  * INSTCODE  : Code FAO WIEWS (ex. 'NOR039') — OBLIGATOIRE",
-        "  * ACCENUMB  : Texte libre depuis colonne 'Genotype' — OBLIGATOIRE",
-        "  * GENUS     : Genre botanique, initiale MAJUSCULE — OBLIGATOIRE",
+        "  * INSTCODE  : FAO WIEWS code (e.g. 'NOR039') — REQUIRED",
+        "  * ACCENUMB  : Free text from 'Genotype' column — REQUIRED",
+        "  * GENUS     : Botanical genus, uppercase initial — REQUIRED",
         "",
-        "  TRIADE QUALITÉ GERMINATE ",
+        "  QUALITY TRIAD FOR GERMINATE ",
         rule("-"),
-        "  INSTCODE + ACCENUMB + GENUS = minimum recommandé pour des passeports exploitables.",
+        "  INSTCODE + ACCENUMB + GENUS = minimum recommended for usable passports.",
         "",
-        "  COORDONNÉES ",
+        "  COORDINATES ",
         rule("-"),
-        "  LATITUDE (DMS) XOR DECLATITUDE (décimal)  — jamais les deux",
-        "  LONGITUDE (DMS) XOR DECLONGITUDE (décimal) — jamais les deux",
+        "  LATITUDE (DMS) XOR DECLATITUDE (decimal)  — never both",
+        "  LONGITUDE (DMS) XOR DECLONGITUDE (decimal) — never both",
         rule("="),
     ]
 
-    # ERREURS BLOQUANTES
+    # BLOCKING ERRORS
     if errors:
-        lines += [""] + box("ERREURS BLOQUANTES — Ingestion Germinate IMPOSSIBLE") + [""]
+        lines += [""] + box("BLOCKING ERRORS — Germinate ingestion IMPOSSIBLE") + [""]
         for cat, issues in sorted(errors_by_cat.items()):
             n_aff    = len({i["row"] for i in issues} - {0})
             n_struct = len([i for i in issues if i["row"] == 0])
@@ -959,7 +831,7 @@ def _format_report(
                     lines.append(
                         f"  Row {str(iss['row']).rjust(4)}  |  "
                         f"ACCENUMB: {iss['accenumb'].ljust(30)}  |  "
-                        f"Champ: {iss['field']}"
+                        f"Field: {iss['field']}"
                     )
                     for ml in iss["message"].split("\n"):
                         lines.append("              " + ml)
@@ -968,9 +840,9 @@ def _format_report(
             else:
                 for iss in issues:
                     lines.append(
-                        f"  Ligne {str(iss['row']).rjust(4)}  |  "
+                        f"  Row {str(iss['row']).rjust(4)}  |  "
                         f"ACCENUMB: {iss['accenumb'].ljust(25)}  |  "
-                        f"Champ: {iss['field']}"
+                        f"Field: {iss['field']}"
                     )
                     for ml in iss["message"].split("\n"):
                         lines.append("              " + ml)
@@ -978,7 +850,7 @@ def _format_report(
     else:
         lines += ["", "  OK   No critical errors detected.", ""]
 
-    # AVERTISSEMENTS
+    # WARNINGS
     if warnings:
         lines += [rule("=")] + box("WARNINGS — Quality enrichment recommended") + [""]
         lines += [
@@ -988,7 +860,7 @@ def _format_report(
         ]
         for cat, issues in sorted(warnings_by_cat.items()):
             n_aff = len({i["row"] for i in issues})
-            lines.append(f"  [{cat}]  {n_aff} accession(s) affectée(s)")
+            lines.append(f"  [{cat}]  {n_aff} accession(s) affected")
             lines.append(rule("-"))
             for iss in issues:
                 lines.append(
@@ -1002,7 +874,7 @@ def _format_report(
     else:
         lines += ["", "  OK   No warnings detected.", ""]
 
-    # RÉSUMÉ
+    # SUMMARY
     missing_col_issues = errors_by_cat.get("MISSING_COLUMN", [])
     mandatory_issues   = errors_by_cat.get("MANDATORY_TRIAD", [])
     n_missing_cols     = len(missing_col_issues)
@@ -1054,20 +926,18 @@ def _format_report(
 
 
 # ==============================================================================
-# SECTION 11 — POINT D'ENTRÉE PUBLIC
+# SECTION 11 — PUBLIC ENTRY POINT
 # ==============================================================================
-
 def run_validation(excel_path: str) -> str:
     try:
         df, csv_path = _load_and_prepare(excel_path)
     except Exception as e:
         return f"[FATAL] Failed to load file: {e}"
-
     schema = _build_schema(df)
     report = None
     try:
         resource = Resource(path=csv_path, schema=schema)
-        report   = validate(resource)
+        report = validate(resource)
     except Exception as e:
         print(f"[WARN] frictionless validate() : {e}", file=sys.stderr)
     finally:
@@ -1075,22 +945,15 @@ def run_validation(excel_path: str) -> str:
             os.unlink(csv_path)
         except OSError:
             pass
-
-    extra: list[dict] = []
+    extra = []
     extra.extend(_check_mandatory_fields(df))
-    extra.extend(_check_accenumb_uniqueness(df))      # COMPOSITE uniqueness
+    extra.extend(_check_accenumb_uniqueness(df))
     extra.extend(_check_coordinate_exclusivity(df))
     extra.extend(_check_dms_format(df))
     extra.extend(_check_genus_format(df))
     extra.extend(_check_species_format(df))
     extra.extend(_check_subtaxa_format(df))
-
     return _format_report(excel_path, df, report, extra)
-
-
-# ==============================================================================
-# SECTION 12 — EXÉCUTION DIRECTE
-# ==============================================================================
 
 if __name__ == "__main__":
     path = sys.argv[1] if len(sys.argv) > 1 else "Wheat_Minerals sheet_UCP_COUSIN.xlsx"
